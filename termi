@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+import pathlib, sys
+# Resolve the path to the main script relative to this wrapper
+script_path = pathlib.Path(__file__).with_name('termi.py')
+if not script_path.is_file():
+    # fallback to standard location in home directory
+    fallback = pathlib.Path.home() / 'termi' / 'termi.py'
+    if fallback.is_file():
+        script_path = fallback
+
+if not script_path.is_file():
+    sys.stderr.write(f"Error: cannot find termi.py at {script_path}\n")
+    sys.exit(1)
+# Execute the main script with the same arguments
+import subprocess
+result = subprocess.run([sys.executable, str(script_path)] + sys.argv[1:], text=True)
+sys.exit(result.returncode)
