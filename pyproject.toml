@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "termi"
-version = "0.1.0"
+version = "0.2.0"
 description = "Turn natural language into safe terminal commands"
 readme = "README.md"
 license = {text = "MIT"}
@@ -12,3 +12,9 @@ requires-python = ">=3.10"
 
 [project.scripts]
 termi = "termi:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

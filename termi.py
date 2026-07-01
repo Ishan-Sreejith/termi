@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -24,6 +25,24 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
+_API_ERROR_HELP = {
+    400: "Bad request — your input may be malformed.",
+    401: "Authentication failed — your API key is invalid or has been revoked.",
+    403: "Access denied — your API key lacks permission for this model or endpoint.",
+    404: "API endpoint not found — check the API URL.",
+    429: "Rate limit exceeded — your API key is being throttled. Wait and try again.",
+    500: "Provider server error — the AI service is having issues.",
+    502: "Bad gateway — the upstream AI service is temporarily unavailable.",
+    503: "Service unavailable — the AI provider may be down for maintenance.",
+}
+
+_HUMAN_TIPS = {
+    "openai":    "Check your key at https://platform.openai.com/api-keys",
+    "openrouter": "Check your key at https://openrouter.ai/keys",
+    "google":    "Check your key at https://aistudio.google.com/apikey",
+}
+
+__version__ = "0.2.0"
 
 RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 CONFIG_DIR = Path.home() / ".config" / "termi"
@@ -139,7 +158,7 @@ SAFETY_RULES = [
     ),
     SafetyRule(
         "chmod_system",
-        r"\bchmod\b.*\b(-R|--recursive)\b.*\b(/|/etc|/usr|/bin|/System)\b",
+        r"\bchmod\b.*(?<![a-zA-Z0-9_])(-r|--recursive)(?=\s|$).*(?<![a-zA-Z0-9_])(/etc|/usr|/bin|/System|/)\b",
         "critical",
         "Recursive permission changes on system paths are dangerous.",
         True,
@@ -219,7 +238,7 @@ SAFETY_RULES = [
     ),
     SafetyRule(
         "chown_recursive_system",
-        r"\bchown\b.*\b(-r|--recursive)\b.*\b(/|/etc|/usr|/bin|/system)\b",
+        r"\bchown\b.*(?<![a-zA-Z0-9_])(-r|--recursive)(?=\s|$).*(?<![a-zA-Z0-9_])(/etc|/usr|/bin|/system|/)\b",
         "critical",
         "Recursive ownership changes on system paths are dangerous.",
         True,
@@ -298,6 +317,14 @@ def normalize_suggestion(payload: dict[str, Any]) -> ModelSuggestion:
     )
 
 
+def _friendly_api_error(code: int, details: str, provider: str = "") -> str:
+    msg = _API_ERROR_HELP.get(code, f"HTTP {code} — unexpected server error.")
+    if code in (401, 403, 429):
+        tip = _HUMAN_TIPS.get(provider, "Check your API key is valid and has credits.")
+        return f"{msg}\n  Tip: {tip}\n  Details: {details.strip()[:200]}"
+    return f"{msg}\n  Details: {details.strip()[:200]}"
+
+
 def call_model(
     api_url: str,
     api_key: str,
@@ -305,6 +332,7 @@ def call_model(
     instruction: str,
     context: EnvironmentContext,
     timeout: int,
+    provider: str = "",
 ) -> ModelSuggestion:
     user_payload = {
         "instruction": instruction,
@@ -360,13 +388,16 @@ def call_model(
                 last_error = exc
                 continue
 
-            raise RuntimeError(f"Model API HTTP error {code}: {details}") from exc
+            raise RuntimeError(_friendly_api_error(code, details, provider)) from exc
         except error.URLError as exc:
-            raise RuntimeError(f"Model API connection failed: {exc.reason}") from exc
+            raise RuntimeError(
+                f"Model API connection failed: {exc.reason}. "
+                f"Check your network and that the API URL is correct."
+            ) from exc
 
     if last_error:
         details = last_error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Model API HTTP error {last_error.code}: {details}") from last_error
+        raise RuntimeError(_friendly_api_error(last_error.code, details, provider)) from last_error
 
     payload = json.loads(body)
     try:
@@ -379,6 +410,8 @@ def call_model(
 
 
 def parse_tokens(command: str) -> list[str]:
+    if "\x00" in command:
+        raise ValueError("Command contains null bytes; refusing to parse.")
     if os.name == "nt":
         return shlex.split(command, posix=False)
     return shlex.split(command, posix=True)
@@ -671,9 +704,10 @@ def format_report(
 def _copy_to_clipboard(text: str) -> None:
     """Copy text to the system clipboard."""
     try:
-        if platform.system() == "Darwin":
+        system = platform.system()
+        if system == "Darwin":
             subprocess.run(["pbcopy"], input=text, text=True, check=True)
-        elif platform.system() == "Linux":
+        elif system == "Linux":
             for cmd in [["xclip", "-selection", "clipboard"], ["xsel", "-ib"]]:
                 try:
                     subprocess.run(cmd, input=text, text=True, check=True)
@@ -683,9 +717,20 @@ def _copy_to_clipboard(text: str) -> None:
             else:
                 print("clipboard: install xclip or xsel", file=sys.stderr)
                 return
+        elif system == "Windows":
+            subprocess.run(
+                ["powershell", "-Command", "Set-Clipboard"],
+                input=text, text=True, check=True,
+            )
         else:
             print("clipboard: not supported on this OS", file=sys.stderr)
             return
+    except FileNotFoundError:
+        print("clipboard: pbcopy/xclip/powershell not found", file=sys.stderr)
+        return
+    except subprocess.CalledProcessError:
+        print("clipboard: process failed", file=sys.stderr)
+        return
     except Exception as exc:
         print(f"clipboard: {exc}", file=sys.stderr)
         return
@@ -1123,6 +1168,11 @@ def main() -> int:
         nargs="*",
         help="Natural language instruction to convert into a command",
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     parser.add_argument("--cwd", default=None, help="Override working directory context")
     parser.add_argument("--os", dest="os_name", default=None, help="Override operating system context")
     parser.add_argument("--shell", default=None, help="Override shell context")
@@ -1280,6 +1330,7 @@ def main() -> int:
                 instruction=instruction_text,
                 context=context,
                 timeout=args.timeout,
+                provider=provider,
             )
             if api_key == BUILTIN_DEMO_KEY:
                 _increment_demo_usage(config)
@@ -1393,5 +1444,18 @@ def main() -> int:
     return result.returncode
 
 
+def _entrypoint() -> None:
+    """Wrapper to catch KeyboardInterrupt and handle SIGPIPE for clean exit."""
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print(file=sys.stderr)
+        print("Interrupted.", file=sys.stderr)
+        raise SystemExit(130)
+    except BrokenPipeError:
+        raise SystemExit(0)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _entrypoint()
