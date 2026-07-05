@@ -1214,9 +1214,9 @@ def main() -> int:
         help="Run or re-run first-time key setup",
     )
     parser.add_argument(
-        "--offline",
+        "--online",
         action="store_true",
-        help="Skip API call and use local fallback generator",
+        help="Use AI API for command generation (requires API key or demo mode)",
     )
     parser.add_argument(
         "--timeout",
@@ -1290,7 +1290,7 @@ def main() -> int:
         print("Error: provide a natural language instruction.", file=sys.stderr)
         return 2
 
-    if not args.offline and not api_key:
+    if args.online and not api_key:
         if str(config.get("key_source", "")).lower() == "demo":
             remaining = _demo_remaining_today(config)
             if remaining <= 0:
@@ -1318,9 +1318,8 @@ def main() -> int:
 
     context = gather_context(args.cwd, args.os_name, args.shell)
 
-    if args.offline:
+    if not args.online:
         suggestion = fallback_generator(instruction_text)
-        print("[Offline mode] Using local fallback generator.", file=sys.stderr)
     else:
         try:
             suggestion = call_model(
