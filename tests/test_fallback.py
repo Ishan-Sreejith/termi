@@ -18,6 +18,27 @@ class TestPwd:
         check("where am i", "pwd")
         check("print working directory", "pwd")
 
+class TestWhoami:
+    def test_whoami(self):
+        check("who am i", "whoami")
+        check("current user", "whoami")
+        check("whoami", "whoami")
+
+class TestId:
+    def test_id(self):
+        check("my id", "id")
+        check("user id", "id")
+
+class TestHostname:
+    def test_hostname(self):
+        check("hostname", "hostname")
+        check("computer name", "hostname")
+
+class TestUptime:
+    def test_uptime(self):
+        check("uptime", "uptime")
+        check("how long has system been up", "uptime")
+
 class TestDisk:
     def test_disk(self):
         check("disk space", "df -h")
@@ -31,10 +52,28 @@ class TestDate:
         check("current date", "date")
         check("show clock", "date")
 
+class TestCalendar:
+    def test_cal(self):
+        check("calendar", "cal")
+        check("this month", "cal")
+
+class TestKill:
+    def test_kill_pid(self):
+        check("kill 1234", "kill 1234")
+        check("stop process 5678", "kill 5678")
+
+    def test_killall(self):
+        check("killall chrome", "killall chrome")
+        check("kill all python", "killall python")
+
 class TestProcesses:
     def test_ps(self):
         check("running processes", "ps")
         check("all running processes", "ps aux")
+
+class TestDownload:
+    def test_download(self):
+        check("download file from https://example.com/file.zip", "curl -O https://example.com/file.zip")
 
 class TestNetwork:
     def test_ip(self):
@@ -47,6 +86,9 @@ class TestNetwork:
         check("ping to 8.8.8.8", "ping -c 4 8.8.8.8")
         check("check network connectivity", "ping -c 4 8.8.8.8")
 
+    def test_dns(self):
+        check("dns lookup for google.com", "nslookup google.com")
+
 class TestCreate:
     def test_mkdir(self):
         check("create directory foo", "mkdir -p foo")
@@ -57,6 +99,20 @@ class TestCreate:
         check("create file hello.txt", "touch hello.txt")
         check("make a file named test.py", "touch test.py")
         check("new file data.csv", "touch data.csv")
+
+class TestPermissions:
+    def test_chmod_x(self):
+        check("make script.sh executable", "chmod +x script.sh")
+        check("make file executable run.sh", "chmod +x run.sh")
+
+class TestSymlink:
+    def test_symlink(self):
+        check("symlink /usr/local/bin/python to python3", "ln -s")
+
+class TestArchive:
+    def test_compress(self):
+        check("compress folder into archive.tar.gz", "tar -czvf archive.tar.gz folder")
+        check("extract file.zip", "unzip file.zip")
 
 class TestDelete:
     def test_delete_all_ext(self):
@@ -81,6 +137,19 @@ class TestMove:
     def test_move(self):
         check("move file.txt to /tmp", "mv file.txt /tmp")
         check("mv old.txt to new.txt", "mv old.txt new.txt")
+
+class TestHead:
+    def test_head(self):
+        check("show first 10 lines of log.txt", "head -n 10 log.txt")
+        check("head first 5 lines of data.csv", "head -n 5 data.csv")
+
+class TestTail:
+    def test_tail(self):
+        check("show last 20 lines of errors.log", "tail -n 20 errors.log")
+
+class TestWc:
+    def test_wc(self):
+        check("count lines in file.txt", "wc -l file.txt")
 
 class TestCat:
     def test_cat(self):
@@ -112,6 +181,32 @@ class TestFind:
     def test_find(self):
         check("find files named config.json", "find . -name config.json")
         check("find named '*.py'", "find . -name '*.py'")
+
+class TestSort:
+    def test_sort(self):
+        check("sort files by size /tmp", "ls -lh-S /tmp")
+
+class TestUnique:
+    def test_unique(self):
+        check("get unique lines", "sort | uniq")
+
+class TestEnv:
+    def test_env_var(self):
+        check("environment variable PATH", "echo $PATH")
+
+class TestWhich:
+    def test_which(self):
+        check("where is python", "which python")
+
+class TestSystemInfo:
+    def test_uname(self):
+        check("system info", "uname -a")
+        check("show kernel version", "uname -a")
+
+class TestHistory:
+    def test_history(self):
+        check("history", "history")
+        check("show recent commands", "history")
 
 class TestFallback:
     def test_unknown(self):

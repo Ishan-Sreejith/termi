@@ -972,6 +972,56 @@ def fallback_generator(instruction: str) -> ModelSuggestion:
             explanation="Print current working directory.",
             risk_level="low", warnings=[], alternatives=["echo $PWD"])
 
+    # —————————————————————— whoami / user ——————————————————————
+    if any(w in instruction for w in ["who am i", "current user", "logged in",
+                                       "username", "whoami"]):
+        return ModelSuggestion(command="whoami",
+            explanation="Show current username.",
+            risk_level="low", warnings=[], alternatives=["id -un", "echo $USER"])
+
+    if any(w in instruction for w in ["user id", "userid", "uid", "my id"]):
+        return ModelSuggestion(command="id",
+            explanation="Show user and group IDs.",
+            risk_level="low", warnings=[], alternatives=["id -u", "id -un"])
+
+    # —————————————————————— hostname ——————————————————————
+    if any(w in instruction for w in ["hostname", "computer name", "machine name"]):
+        return ModelSuggestion(command="hostname",
+            explanation="Show the system's hostname.",
+            risk_level="low", warnings=[], alternatives=["uname -n", "hostname -f"])
+
+    # —————————————————————— uptime ——————————————————————
+    if any(w in instruction for w in ["uptime", "how long", "system up"]):
+        return ModelSuggestion(command="uptime",
+            explanation="Show how long the system has been running.",
+            risk_level="low", warnings=[], alternatives=["w"])
+
+    # ————————————————————— sort —————————————————————
+    if any(w in instruction for w in ["sort", "sorted", "order"]):
+        m = re.search(r"(?:sort|sorted)\s+(?:files?\s+)?(?:by\s+)?(?:size|time)\s+(?:\S+\s+)?(\S+)", instruction)
+        if m:
+            target = m.group(1)
+            if target in ("in", "of", "for"):
+                target = instruction.split()[-1]
+            by = "-S" if "size" in instruction else "-t"
+            return ModelSuggestion(command=f"ls -lh{by} {shlex.quote(target)}",
+                explanation=f"List '{target}' sorted by size.",
+                risk_level="low", warnings=[], alternatives=[])
+        m = re.search(r"sort\s+(?:by\s+)?(?:size|time)", instruction)
+        if m:
+            return ModelSuggestion(command="du -sh * | sort -h",
+                explanation="Show sizes of items in current dir, sorted.",
+                risk_level="low", warnings=[], alternatives=["ls -lhS"])
+        return ModelSuggestion(command="sort",
+            explanation="Sort lines of input (pipe to this command).",
+            risk_level="low", warnings=[], alternatives=["sort -h", "sort -n"])
+
+    # ————————————————————— unique —————————————————————
+    if any(w in instruction for w in ["unique", "dedup", "duplicate"]):
+        return ModelSuggestion(command="sort | uniq",
+            explanation="Remove duplicate lines from sorted input.",
+            risk_level="low", warnings=[], alternatives=["sort -u", "uniq -c"])
+
     # —————————————————————— disk / space / usage ——————————————————————
     if any(w in instruction for w in ["disk", "space", "storage", "usage", "size"]):
         m = re.search(r"(?:of|for)\s+(\S+)", instruction)
@@ -990,6 +1040,50 @@ def fallback_generator(instruction: str) -> ModelSuggestion:
         return ModelSuggestion(command="date",
             explanation="Show current date and time.",
             risk_level="low", warnings=[], alternatives=["date -u", "cal"])
+
+    # ———————————————————————— calendar ——————————————————————————
+    if "this month" in instruction or any(w in instruction.split() for w in ["calendar", "ncal"]) or \
+       instruction.split() == ["cal"] or re.search(r"\bcal\b", instruction):
+        return ModelSuggestion(command="cal",
+            explanation="Show this month's calendar.",
+            risk_level="low", warnings=[], alternatives=["cal -y", "ncal"])
+
+    # ————————————————————— download —————————————————————
+    m = re.search(r"(?:download|fetch|get)\s+(?:file\s+)?(?:from\s+)?(https?://\S+)", instruction)
+    if m:
+        url = m.group(1)
+        return ModelSuggestion(command=f"curl -O {shlex.quote(url)}",
+            explanation=f"Download file from {url}.",
+            risk_level="low",
+            warnings=["Verify the URL before downloading."],
+            alternatives=[f"wget {shlex.quote(url)}"])
+
+    # ————————————————————— curl —————————————————————
+    m = re.search(r"(?:curl|fetch url|http get)\s+(https?://\S+)", orig, re.IGNORECASE)
+    if m:
+        url = m.group(1)
+        return ModelSuggestion(command=f"curl -s {shlex.quote(url)}",
+            explanation=f"Make an HTTP GET request to {url}.",
+            risk_level="low", warnings=[], alternatives=[f"http {shlex.quote(url)}"])
+
+    # ———————————————————— kill ————————————————————
+    m = re.search(r"(?:kill|stop|terminate)\s+(?:process\s+)?(\d+)", instruction)
+    if m:
+        pid = m.group(1)
+        return ModelSuggestion(command=f"kill {pid}",
+            explanation=f"Kill process with PID {pid}.",
+            risk_level="medium",
+            warnings=[f"This will terminate process {pid}."],
+            alternatives=[f"kill -9 {pid} (force kill)", f"kill -15 {pid} (graceful)"])
+
+    m = re.search(r"(?:killall|kill all)\s+(\S+)", instruction)
+    if m and m.group(1) not in ("the", "a", "process", "all"):
+        name = m.group(1)
+        return ModelSuggestion(command=f"killall {shlex.quote(name)}",
+            explanation=f"Kill all processes named '{name}'.",
+            risk_level="medium",
+            warnings=[f"This will kill all '{name}' processes."],
+            alternatives=[f"pkill {shlex.quote(name)}"])
 
     # ———————————————————— processes ————————————————————
     if any(w in instruction for w in ["process", "running", "ps", "top", "htop"]):
@@ -1013,6 +1107,32 @@ def fallback_generator(instruction: str) -> ModelSuggestion:
             explanation=f"Ping {target} to check connectivity.",
             risk_level="low", warnings=[], alternatives=["curl -I https://example.com"])
 
+    # ———————————————————— dns / nslookup ————————————————————
+    m = re.search(r"(?:dns\s+lookup|nslookup|resolve|lookup)\s+(?:for\s+)?(\S+)", instruction)
+    if m:
+        host = m.group(1)
+        return ModelSuggestion(command=f"nslookup {shlex.quote(host)}",
+            explanation=f"DNS lookup for '{host}'.",
+            risk_level="low", warnings=[], alternatives=[f"dig {shlex.quote(host)}"])
+
+    # ————————————————————— download —————————————————————
+    m = re.search(r"(?:download|fetch|get)\s+(?:file\s+)?(?:from\s+)?(https?://\S+)", instruction)
+    if m:
+        url = m.group(1)
+        return ModelSuggestion(command=f"curl -O {shlex.quote(url)}",
+            explanation=f"Download file from {url}.",
+            risk_level="low",
+            warnings=["Verify the URL before downloading."],
+            alternatives=[f"wget {shlex.quote(url)}"])
+
+    # ————————————————————— curl —————————————————————
+    m = re.search(r"(?:curl|fetch url|http get)\s+(https?://\S+)", orig, re.IGNORECASE)
+    if m:
+        url = m.group(1)
+        return ModelSuggestion(command=f"curl -s {shlex.quote(url)}",
+            explanation=f"Make an HTTP GET request to {url}.",
+            risk_level="low", warnings=[], alternatives=[f"http {shlex.quote(url)}"])
+
     # ————————————————————— create directory —————————————————————
     m = re.search(r"(?:create|make|new)\s+(?:a\s+)?(?:dir(?:ectory)?|folder)\s+(?:called|named)?\s*(\S+)", instruction)
     if m:
@@ -1021,6 +1141,33 @@ def fallback_generator(instruction: str) -> ModelSuggestion:
             explanation=f"Create directory '{folder}'.",
             risk_level="low", warnings=[], alternatives=[])
 
+    # ————————————————————— permissions —————————————————————
+    m = re.search(r"(?:make|chmod|set)\s+(?:file\s+)?(?:executable|runable)\s+(.+)", instruction)
+    if not m:
+        m = re.search(r"(?:file\s+)?(.+?)\s+(?:executable|runnable|runable)\s*$", instruction)
+    if m:
+        target = m.group(1).strip()
+        for prefix in ("make ", "chmod ", "set "):
+            if target.lower().startswith(prefix):
+                target = target[len(prefix):]
+                break
+        if target and target not in ("the", "a", "an", "this", "file", "it"):
+            return ModelSuggestion(command=f"chmod +x {shlex.quote(target)}",
+                explanation=f"Make '{target}' executable.",
+                risk_level="medium",
+                warnings=["Ensure the file is safe to execute."],
+                alternatives=[f"chmod 755 {shlex.quote(target)}"])
+
+    m = re.search(r"(?:make|chmod|set)\s+(\S+)\s+(?:read-?only|writable)", instruction)
+    if m:
+        target = m.group(1)
+        perm = "444" if "read" in instruction else "644" if "writ" in instruction else "755"
+        return ModelSuggestion(command=f"chmod {perm} {shlex.quote(target)}",
+            explanation=f"Change permissions of '{target}' to {perm}.",
+            risk_level="medium",
+            warnings=["Changing permissions can affect security."],
+            alternatives=[])
+
     # ————————————————————— create file —————————————————————
     m = re.search(r"(?:create|make|new)\s+(?:a\s+)?file\s+(?:called|named)?\s*(\S+)", instruction)
     if m:
@@ -1028,13 +1175,90 @@ def fallback_generator(instruction: str) -> ModelSuggestion:
         return ModelSuggestion(command=f"touch {shlex.quote(fname)}",
             explanation=f"Create empty file '{fname}'.",
             risk_level="low", warnings=[], alternatives=[])
+    m = re.search(r"(?:make|chmod|set)\s+(?:file\s+)?(?:executable|runable)\s+(.+)", instruction)
+    if not m:
+        m = re.search(r"(?:file\s+)?(.+?)\s+(?:executable|runnable|runable)\s*$", instruction)
+    if m:
+        target = m.group(1).strip()
+        for prefix in ("make ", "chmod ", "set "):
+            if target.lower().startswith(prefix):
+                target = target[len(prefix):]
+                break
+        if target and target not in ("the", "a", "an", "this", "file", "it"):
+            return ModelSuggestion(command=f"chmod +x {shlex.quote(target)}",
+                explanation=f"Make '{target}' executable.",
+                risk_level="medium",
+                warnings=["Ensure the file is safe to execute."],
+                alternatives=[f"chmod 755 {shlex.quote(target)}"])
+
+    m = re.search(r"(?:make|chmod|set)\s+(\S+)\s+(?:read-?only|writable)", instruction)
+    if m:
+        target = m.group(1)
+        perm = "444" if "read" in instruction else "644" if "writ" in instruction else "755"
+        return ModelSuggestion(command=f"chmod {perm} {shlex.quote(target)}",
+            explanation=f"Change permissions of '{target}' to {perm}.",
+            risk_level="medium",
+            warnings=["Changing permissions can affect security."],
+            alternatives=[])
+
+    # ————————————————————— symlink —————————————————————
+    m = re.search(r"(?:symlink|link|shortcut)\s+(\S+)\s+(?:to|->)\s+(\S+)", instruction)
+    if m:
+        target, link_name = m.group(1), m.group(2)
+        return ModelSuggestion(command=f"ln -s {shlex.quote(target)} {shlex.quote(link_name)}",
+            explanation=f"Create a symbolic link from '{link_name}' → '{target}'.",
+            risk_level="medium",
+            warnings=["Symlinks can break if the target is moved."],
+            alternatives=[])
+
+    # ————————————————————— archive / compress —————————————————————
+    m = re.search(r"(?:compress|zip|archive)\s+(\S+)\s+(?:into|to|as\s+)?(\S+)", instruction)
+    if m:
+        src, dst = m.group(1), m.group(2)
+        if dst in ("into", "to", "as"):
+            dst = instruction.split()[-1]
+        if dst.endswith((".tar.gz", ".tgz")):
+            return ModelSuggestion(command=f"tar -czvf {shlex.quote(dst)} {shlex.quote(src)}",
+                explanation=f"Compress '{src}' into '{dst}'.",
+                risk_level="low", warnings=[], alternatives=[])
+        elif dst.endswith(".zip"):
+            return ModelSuggestion(command=f"zip -r {shlex.quote(dst)} {shlex.quote(src)}",
+                explanation=f"Zip '{src}' into '{dst}'.",
+                risk_level="low", warnings=[], alternatives=[])
+        else:
+            return ModelSuggestion(command=f"tar -czvf {shlex.quote(dst)}.tar.gz {shlex.quote(src)}",
+                explanation=f"Compress '{src}' into '{dst}.tar.gz'.",
+                risk_level="low", warnings=[], alternatives=[])
+
+    m = re.search(r"(?:extract|unzip|uncompress|decompress)\s+(\S+)", instruction)
+    if m:
+        archive = m.group(1)
+        if archive.endswith(".zip"):
+            return ModelSuggestion(command=f"unzip {shlex.quote(archive)}",
+                explanation=f"Extract '{archive}'.",
+                risk_level="low", warnings=[], alternatives=[])
+        elif archive.endswith((".tar.gz", ".tgz")):
+            return ModelSuggestion(command=f"tar -xzvf {shlex.quote(archive)}",
+                explanation=f"Extract '{archive}'.",
+                risk_level="low", warnings=[], alternatives=[])
+        elif archive.endswith(".tar.bz2"):
+            return ModelSuggestion(command=f"tar -xjvf {shlex.quote(archive)}",
+                explanation=f"Extract '{archive}'.",
+                risk_level="low", warnings=[], alternatives=[])
+        elif archive.endswith(".tar"):
+            return ModelSuggestion(command=f"tar -xvf {shlex.quote(archive)}",
+                explanation=f"Extract '{archive}'.",
+                risk_level="low", warnings=[], alternatives=[])
+        else:
+            return ModelSuggestion(command=f"tar -xzvf {shlex.quote(archive)}",
+                explanation=f"Extract '{archive}' (assuming tar.gz).",
+                risk_level="low", warnings=[], alternatives=[])
 
     # ————————————————————— delete / remove —————————————————————
     # 1) "delete all txt files" or "delete all .txt files" → rm *.txt
     m = re.search(r"(?:delete|remove)\s+(?:all\s+)?\.?(\w+)\s+files?", instruction)
     if m:
         ext = m.group(1)
-        # "all txt files" → ext = "txt"
         if ext not in ("the", "a", "an", "these", "those", "my"):
             return ModelSuggestion(command=f"rm -v *.{ext}",
                 explanation=f"Delete all *.{ext} files.",
@@ -1082,21 +1306,43 @@ def fallback_generator(instruction: str) -> ModelSuggestion:
             warnings=["Moving can overwrite existing files."],
             alternatives=[])
 
+    # ————————————————————— head —————————————————————
+    m = re.search(r"(?:head|first)\s+(\d+)\s+lines?\s+(?:of\s+)?(\S+)", instruction)
+    if m:
+        n, target = m.group(1), m.group(2)
+        return ModelSuggestion(command=f"head -n {n} {shlex.quote(target)}",
+            explanation=f"Show first {n} lines of '{target}'.",
+            risk_level="low", warnings=[], alternatives=[f"sed -n '1,{n}p' {shlex.quote(target)}"])
+
+    # ————————————————————— tail —————————————————————
+    m = re.search(r"(?:tail|last)\s+(\d+)\s+lines?\s+(?:of\s+)?(\S+)", instruction)
+    if m:
+        n, target = m.group(1), m.group(2)
+        return ModelSuggestion(command=f"tail -n {n} {shlex.quote(target)}",
+            explanation=f"Show last {n} lines of '{target}'.",
+            risk_level="low", warnings=[], alternatives=[f"tail -f {shlex.quote(target)}"])
+
+    # ————————————————————— wc (word count) —————————————————————
+    if "count" in instruction and any(w in instruction for w in ["line", "word", "char"]):
+        m = re.search(r"(?:lines?|words?|chars?)\s+(?:in\s+)?(\S+)", instruction)
+        if m:
+            target = m.group(1)
+            flag = "-l" if "line" in instruction else "-w" if "word" in instruction else "-c"
+            return ModelSuggestion(command=f"wc {flag} {shlex.quote(target)}",
+                explanation=f"Count items in '{target}'.",
+                risk_level="low", warnings=[], alternatives=["wc"])
+
     # ————————————————————— show file contents —————————————————————
-    # Only match when there's a clear filename or "contents of" phrase
     show_words = {"show", "display", "print", "cat", "read", "view", "open"}
     if any(w in instruction.split() for w in show_words):
-        # "contents of X" or "inside X"
         m = re.search(r"(?:contents?|inside)\s+(?:of\s+)?(.+)$", instruction)
         if m:
             target = m.group(1).rstrip(".,;:!?")
         else:
-            # "cat X" / "read X" / "open X" where X has a filename dot
             m = re.search(r"(?:cat|read|view|open)\s+(?:file\s+)?([\w./-]+\.[\w./-]+)", instruction)
             if m:
                 target = m.group(1)
             else:
-                # "show|print|display [optional words] <file.ext>"
                 m = re.search(r"(?:show|display|print)\s+(?:\w+\s+)*(?:file\s+)?([\w./-]+\.[\w./-]+)", instruction)
                 if m:
                     target = m.group(1)
@@ -1109,19 +1355,32 @@ def fallback_generator(instruction: str) -> ModelSuggestion:
                 explanation=f"Display contents of '{target}'.",
                 risk_level="low", warnings=[], alternatives=["less", "head", "tail"])
 
+    # ————————————————————— system info —————————————————————
+    if any(w in instruction for w in ["system info", "uname", "kernel",
+                                       "os version", "operating system"]):
+        return ModelSuggestion(command="uname -a",
+            explanation="Show full system/kernel information.",
+            risk_level="low", warnings=[], alternatives=["cat /etc/os-release"])
+
+    # ————————————————————— history —————————————————————
+    if any(w in instruction for w in ["history", "recent commands", "last commands"]):
+        return ModelSuggestion(command="history",
+            explanation="Show command history.",
+            risk_level="low", warnings=[], alternatives=["history 20"])
+
     # ————————————————————— list / show directory —————————————————————
     if any(w in instruction.split() for w in ["list", "what's", "ls", "dir"]) or \
        (instruction.startswith("show") and not any(w in instruction for w in
-                                                   ["content", "inside", "running", "process",
-                                                    "date", "time", "disk", "space", "ip"])):
+                                                    ["content", "inside", "running", "process",
+                                                     "date", "time", "disk", "space", "ip"])):
         if "all" in instruction or "hidden" in instruction:
             return ModelSuggestion(command="ls -la",
                 explanation="List all files including hidden ones.",
                 risk_level="low", warnings=[], alternatives=["ls -la", "ls -lh"])
-        elif "long" in instruction or "detailed" in instruction:
-            return ModelSuggestion(command="ls -l",
-                explanation="List files with detailed info.",
-                risk_level="low", warnings=[], alternatives=["ls -la", "ls -lh"])
+        elif "long" in instruction or "detailed" in instruction or "size" in instruction:
+            return ModelSuggestion(command="ls -lh",
+                explanation="List files with detailed info and sizes.",
+                risk_level="low", warnings=[], alternatives=["ls -la", "ls -l"])
         else:
             return ModelSuggestion(command="ls",
                 explanation="List files in the current directory.",
@@ -1132,7 +1391,6 @@ def fallback_generator(instruction: str) -> ModelSuggestion:
         m = re.search(r"(?:search|grep)\s+(?:for\s+)?['\"]?(.+?)['\"]?\s+in\s+(\S+)", instruction)
         if m:
             pattern, target = m.group(1), m.group(2)
-            # Preserve original case from un‑lowered instruction
             m_orig = re.search(r"(?:search|grep)\s+(?:for\s+)?['\"]?(.+?)['\"]?\s+in\s+\S+", orig, re.IGNORECASE)
             if m_orig:
                 pattern = m_orig.group(1)
@@ -1149,6 +1407,54 @@ def fallback_generator(instruction: str) -> ModelSuggestion:
                 explanation=f"Find files named '{pattern}'.",
                 risk_level="low", warnings=[], alternatives=["locate", "fd"])
 
+    # ————————————————————— sort —————————————————————
+    if any(w in instruction for w in ["sort", "sorted", "order"]):
+        m = re.search(r"(?:sort|sorted)\s+(?:by\s+)?(?:size|time)\s+(\S+)", instruction)
+        if m:
+            target = m.group(1)
+            return ModelSuggestion(command=f"ls -lhS {shlex.quote(target)}",
+                explanation=f"List '{target}' sorted by size.",
+                risk_level="low", warnings=[])
+        return ModelSuggestion(command="sort",
+            explanation="Sort lines of input (pipe to this command).",
+            risk_level="low", warnings=[], alternatives=["sort -h", "sort -n"])
+
+    # ————————————————————— unique —————————————————————
+    if any(w in instruction for w in ["unique", "dedup", "duplicate"]):
+        return ModelSuggestion(command="sort | uniq",
+            explanation="Remove duplicate lines from sorted input.",
+            risk_level="low", warnings=[], alternatives=["sort -u", "uniq -c"])
+
+    # ————————————————————— environment variables —————————————————————
+    if any(w in instruction for w in ["env var", "environment variable", "echo $"]):
+        m = re.search(r"(?:get|show|print|echo)\s*(?:\$)?(\w+)", instruction)
+        if not m:
+            m = re.search(r"(?:env\s+var|environment\s+variable)\s+(\w+)", instruction)
+        if m:
+            var = m.group(1)
+            m_orig = re.search(rf"\b{re.escape(var)}\b", orig, re.IGNORECASE)
+            if m_orig:
+                var = m_orig.group(0)
+            return ModelSuggestion(command=f"echo ${var}",
+                explanation=f"Show the value of ${var}.",
+                risk_level="low", warnings=[], alternatives=[f"printenv {var}"])
+        return ModelSuggestion(command="env",
+            explanation="Show all environment variables.",
+            risk_level="low", warnings=[], alternatives=["printenv"])
+
+    if any(w in instruction for w in ["env", "environment", "printenv"]):
+        return ModelSuggestion(command="env",
+            explanation="Show all environment variables.",
+            risk_level="low", warnings=[], alternatives=["printenv"])
+
+    # ————————————————————— which / type —————————————————————
+    m = re.search(r"(?:where is|which|location of|path of)\s+(\S+)", instruction)
+    if m:
+        cmd = m.group(1)
+        return ModelSuggestion(command=f"which {shlex.quote(cmd)}",
+            explanation=f"Show the full path of '{cmd}'.",
+            risk_level="low", warnings=[], alternatives=[f"type {shlex.quote(cmd)}"])
+
     # ————————————————————— default fallback —————————————————————
     return ModelSuggestion(
         command="echo 'fallback: no command generated'",
@@ -1157,6 +1463,308 @@ def fallback_generator(instruction: str) -> ModelSuggestion:
         warnings=[],
         alternatives=[]
     )
+
+
+_TOOL_DICT: dict[str, list[tuple[str, str]]] = {
+    "brew": [
+        ("brew list", "List all installed formulae"),
+        ("brew install <pkg>", "Install a package"),
+        ("brew uninstall <pkg>", "Uninstall a package"),
+        ("brew update", "Update Homebrew itself and formulae list"),
+        ("brew upgrade", "Upgrade all outdated packages"),
+        ("brew upgrade <pkg>", "Upgrade a specific package"),
+        ("brew search <term>", "Search for a package"),
+        ("brew info <pkg>", "Show package info"),
+        ("brew doctor", "Check system for potential problems"),
+        ("brew cleanup", "Remove old versions of installed packages"),
+        ("brew outdated", "List outdated packages"),
+        ("brew services list", "List all managed services"),
+        ("brew services start <svc>", "Start a service"),
+        ("brew services stop <svc>", "Stop a service"),
+        ("brew pin <pkg>", "Prevent a package from being upgraded"),
+        ("brew unpin <pkg>", "Allow a package to be upgraded"),
+        ("brew bundle dump", "Create a Brewfile from installed packages"),
+        ("brew bundle install", "Install packages from a Brewfile"),
+    ],
+    "npm": [
+        ("npm init", "Create a package.json file"),
+        ("npm install <pkg>", "Install a package locally"),
+        ("npm install -g <pkg>", "Install a package globally"),
+        ("npm install", "Install all deps from package.json"),
+        ("npm uninstall <pkg>", "Uninstall a package"),
+        ("npm update", "Update all packages"),
+        ("npm outdated", "List outdated packages"),
+        ("npm list", "List installed packages (tree)"),
+        ("npm list --depth=0", "List top-level packages only"),
+        ("npm run <script>", "Run a script from package.json"),
+        ("npm test", "Run the test script"),
+        ("npm start", "Run the start script"),
+        ("npm publish", "Publish a package to the registry"),
+        ("npm audit", "Audit dependencies for vulnerabilities"),
+        ("npm audit fix", "Auto-fix vulnerabilities"),
+        ("npm ci", "Clean install from lockfile"),
+        ("npm cache clean --force", "Clear npm cache"),
+        ("npm config list", "List npm configuration"),
+    ],
+    "git": [
+        ("git init", "Initialize a new repository"),
+        ("git clone <url>", "Clone a remote repository"),
+        ("git add <file>", "Stage a file"),
+        ("git add .", "Stage all changes"),
+        ("git commit -m <msg>", "Commit staged changes"),
+        ("git commit -am <msg>", "Stage+commit tracked files"),
+        ("git push", "Push commits to remote"),
+        ("git push origin <branch>", "Push to a specific remote branch"),
+        ("git pull", "Pull from remote"),
+        ("git status", "Show working tree status"),
+        ("git log", "Show commit history"),
+        ("git log --oneline", "Compact commit history"),
+        ("git diff", "Show unstaged changes"),
+        ("git diff --staged", "Show staged changes"),
+        ("git branch", "List branches"),
+        ("git branch <name>", "Create a branch"),
+        ("git checkout <branch>", "Switch to a branch"),
+        ("git checkout -b <name>", "Create and switch to a branch"),
+        ("git merge <branch>", "Merge a branch into current"),
+        ("git stash", "Stash working directory changes"),
+        ("git stash pop", "Restore stashed changes"),
+        ("git reset HEAD <file>", "Unstage a file"),
+        ("git reset --hard", "Discard all local changes"),
+        ("git tag <name>", "Create a tag"),
+        ("git remote -v", "List remotes"),
+    ],
+    "docker": [
+        ("docker ps", "List running containers"),
+        ("docker ps -a", "List all containers"),
+        ("docker images", "List images"),
+        ("docker pull <img>", "Pull an image"),
+        ("docker build -t <tag> .", "Build an image from Dockerfile"),
+        ("docker run <img>", "Run a container"),
+        ("docker run -it <img> sh", "Run interactively with shell"),
+        ("docker run -d <img>", "Run detached"),
+        ("docker run -p 8080:80 <img>", "Map host port to container"),
+        ("docker stop <container>", "Stop a container"),
+        ("docker start <container>", "Start a container"),
+        ("docker rm <container>", "Remove a container"),
+        ("docker rmi <image>", "Remove an image"),
+        ("docker exec -it <c> sh", "Run command in running container"),
+        ("docker logs <container>", "View container logs"),
+        ("docker compose up", "Start services from docker-compose.yml"),
+        ("docker compose down", "Stop services"),
+        ("docker system prune", "Clean up unused resources"),
+    ],
+    "kubectl": [
+        ("kubectl get pods", "List all pods"),
+        ("kubectl get svc", "List all services"),
+        ("kubectl get deployments", "List deployments"),
+        ("kubectl get nodes", "List cluster nodes"),
+        ("kubectl describe pod <name>", "Show pod details"),
+        ("kubectl logs <pod>", "View pod logs"),
+        ("kubectl exec -it <pod> -- sh", "Shell into a pod"),
+        ("kubectl apply -f <file>", "Apply a config file"),
+        ("kubectl delete pod <name>", "Delete a pod"),
+        ("kubectl port-forward <pod> <p>:<p>", "Forward a port"),
+        ("kubectl config get-contexts", "List available contexts"),
+        ("kubectl config use-context <ctx>", "Switch context"),
+        ("kubectl get all", "List all resources in namespace"),
+        ("kubectl top pod", "Show pod resource usage"),
+    ],
+    "pip": [
+        ("pip install <pkg>", "Install a package"),
+        ("pip install -r requirements.txt", "Install from requirements"),
+        ("pip uninstall <pkg>", "Uninstall a package"),
+        ("pip list", "List installed packages"),
+        ("pip show <pkg>", "Show package details"),
+        ("pip freeze", "List installed packages (pip format)"),
+        ("pip freeze > requirements.txt", "Export requirements"),
+        ("pip check", "Verify installed packages have compatible deps"),
+        ("pip search <term>", "Search PyPI"),
+        ("pip cache purge", "Clear pip cache"),
+        ("pip install -e .", "Install package in editable mode"),
+    ],
+    "python": [
+        ("python -m venv .venv", "Create a virtual environment"),
+        ("source .venv/bin/activate", "Activate venv (macOS/Linux)"),
+        (".venv\\Scripts\\activate", "Activate venv (Windows)"),
+        ("python -m pip install <pkg>", "Install a package"),
+        ("python -m http.server 8000", "Start a simple HTTP server"),
+        ("python -m json.tool <file>", "Pretty-print a JSON file"),
+        ("python -c 'print(1+1)'", "Run a one-liner"),
+        ("python <script.py>", "Run a Python script"),
+        ("python -m pytest", "Run tests with pytest"),
+        ("python -m pdb <script.py>", "Debug a script"),
+    ],
+    "cargo": [
+        ("cargo new <name>", "Create a new Rust project"),
+        ("cargo build", "Build the project"),
+        ("cargo build --release", "Build in release mode"),
+        ("cargo run", "Run the project"),
+        ("cargo test", "Run tests"),
+        ("cargo check", "Check code without building"),
+        ("cargo fmt", "Format code"),
+        ("cargo clippy", "Lint code"),
+        ("cargo add <dep>", "Add a dependency"),
+        ("cargo update", "Update dependencies"),
+        ("cargo doc --open", "Build and open docs"),
+        ("cargo publish", "Publish to crates.io"),
+    ],
+    "go": [
+        ("go mod init <name>", "Initialize a new module"),
+        ("go mod tidy", "Clean up dependencies"),
+        ("go build", "Build the project"),
+        ("go build -o <bin> .", "Build to a specific output"),
+        ("go run <file.go>", "Run a Go file"),
+        ("go test", "Run tests"),
+        ("go test -v", "Run tests verbosely"),
+        ("go fmt", "Format code"),
+        ("go vet", "Analyze for suspicious constructs"),
+        ("go get <pkg>", "Add a dependency"),
+        ("go install <pkg>", "Install a package"),
+    ],
+    "gh": [
+        ("gh repo create <name>", "Create a new repository"),
+        ("gh repo clone <owner>/<repo>", "Clone a repository"),
+        ("gh pr create", "Create a pull request"),
+        ("gh pr list", "List pull requests"),
+        ("gh pr checkout <num>", "Checkout a PR locally"),
+        ("gh pr review <num>", "Review a pull request"),
+        ("gh issue list", "List issues"),
+        ("gh issue create", "Create an issue"),
+        ("gh release create <tag>", "Create a release"),
+        ("gh release list", "List releases"),
+        ("gh run list", "List workflow runs"),
+        ("gh auth status", "Check authentication status"),
+        ("gh config set <key> <val>", "Set a config value"),
+    ],
+    "curl": [
+        ("curl <url>", "Fetch a URL"),
+        ("curl -O <url>", "Download file (preserve name)"),
+        ("curl -o <file> <url>", "Download to a specific file"),
+        ("curl -I <url>", "Fetch HTTP headers only"),
+        ("curl -X POST <url>", "Send POST request"),
+        ("curl -d 'key=val' <url>", "POST with form data"),
+        ("curl -H 'Auth: token' <url>", "Add a custom header"),
+        ("curl -L <url>", "Follow redirects"),
+        ("curl -u user:pass <url>", "Basic auth"),
+        ("curl -v <url>", "Verbose output"),
+    ],
+    "ssh": [
+        ("ssh user@host", "Connect to a remote host"),
+        ("ssh -p <port> user@host", "Connect on a non-default port"),
+        ("ssh -i <key> user@host", "Connect using a specific key"),
+        ("ssh-keygen -t ed25519", "Generate an SSH key pair"),
+        ("ssh-copy-id user@host", "Copy public key to remote host"),
+        ("scp <file> user@host:<path>", "Copy file to remote"),
+        ("scp user@host:<path> <local>", "Copy file from remote"),
+        ("ssh -L 8080:localhost:80 user@host", "Port forwarding (local)"),
+        ("ssh -R 8080:localhost:80 user@host", "Port forwarding (remote)"),
+        ("ssh -J jump@host target@host", "Jump host / bastion"),
+    ],
+    "tar": [
+        ("tar -cvf archive.tar <files>", "Create a tar archive"),
+        ("tar -czvf archive.tar.gz <files>", "Create a gzipped tar"),
+        ("tar -xvf archive.tar", "Extract a tar archive"),
+        ("tar -xzvf archive.tar.gz", "Extract a gzipped tar"),
+        ("tar -tf archive.tar", "List contents of a tar"),
+        ("tar -xvzf archive.tgz", "Extract tgz"),
+        ("tar -cjvf archive.tar.bz2 <files>", "Create bzip2 tar"),
+        ("tar -xjvf archive.tar.bz2", "Extract bzip2 tar"),
+    ],
+    "grep": [
+        ("grep <pattern> <file>", "Search for pattern in file"),
+        ("grep -i <pattern> <file>", "Case-insensitive search"),
+        ("grep -r <pattern> <dir>", "Recursive search in directory"),
+        ("grep -n <pattern> <file>", "Show line numbers"),
+        ("grep -v <pattern> <file>", "Invert match (exclude pattern)"),
+        ("grep -l <pattern> <files>", "List files with matches"),
+        ("grep -c <pattern> <file>", "Count matching lines"),
+        ("grep -E '<regex>' <file>", "Extended regex"),
+        ("grep -A 3 <pattern> <file>", "Show 3 lines after match"),
+        ("grep -B 3 <pattern> <file>", "Show 3 lines before match"),
+    ],
+    "find": [
+        ("find . -name <name>", "Find files by name"),
+        ("find . -iname <name>", "Case-insensitive name search"),
+        ("find . -type f", "Find only files"),
+        ("find . -type d", "Find only directories"),
+        ("find . -size +100M", "Find files larger than 100MB"),
+        ("find . -mtime -7", "Files modified in the last 7 days"),
+        ("find . -name '*.py' -exec rm {} \\;", "Find and execute"),
+        ("find . -empty", "Find empty files/directories"),
+        ("find . -perm 644", "Find files with specific permissions"),
+    ],
+    "brew-commands": [
+        ("brew --prefix", "Show Homebrew install path"),
+        ("brew --cellar", "Show Cellar path"),
+        ("brew --repository", "Show repository path"),
+        ("brew config", "Show Homebrew configuration"),
+        ("brew deps <pkg>", "Show dependencies of a package"),
+        ("brew uses <pkg>", "Show packages that depend on a package"),
+        ("brew leaves", "Show packages not depended on by others"),
+        ("brew missing", "Check for missing dependencies"),
+    ],
+    "system": [
+        ("df -h", "Show disk usage (human-readable)"),
+        ("du -sh <dir>", "Show directory size"),
+        ("du -sh * | sort -h", "Show sizes sorted"),
+        ("free -h", "Show memory usage (Linux)"),
+        ("vm_stat", "Show memory usage (macOS)"),
+        ("top", "Show running processes"),
+        ("htop", "Interactive process viewer"),
+        ("ps aux", "List all processes"),
+        ("ps aux | grep <name>", "Find a process by name"),
+        ("kill <pid>", "Kill a process by PID"),
+        ("kill -9 <pid>", "Force kill a process"),
+        ("killall <name>", "Kill all processes by name"),
+        ("uname -a", "Show system info"),
+        ("uptime", "Show system uptime"),
+        ("whoami", "Show current user"),
+        ("id", "Show user/group IDs"),
+        ("hostname", "Show hostname"),
+        ("date", "Show current date/time"),
+        ("cal", "Show calendar"),
+        ("which <cmd>", "Show full path of a command"),
+        ("type <cmd>", "Show how a command is interpreted"),
+    ],
+}
+
+
+def show_dict(tool: str) -> None:
+    """Print command reference for a tool."""
+    if tool == "__list__":
+        avail = sorted(_TOOL_DICT.keys())
+        print("Available command references:")
+        for name in avail:
+            count = len(_TOOL_DICT[name])
+            title = name.replace("-", " ").title()
+            print(f"  {name:18s}  {count} commands — {title}")
+        print()
+        print("Usage: termi -d <tool>")
+        return
+
+    entries = _TOOL_DICT.get(tool)
+    if entries is None:
+        # Try partial match
+        matches = [k for k in _TOOL_DICT if tool in k]
+        if not matches:
+            print(f"No reference found for '{tool}'.")
+            print("Available: " + ", ".join(sorted(_TOOL_DICT.keys())))
+            return
+        if len(matches) == 1:
+            entries = _TOOL_DICT[matches[0]]
+        else:
+            print(f"Multiple matches for '{tool}':")
+            for m in matches:
+                print(f"  termi -d {m}")
+            return
+
+    title = tool.replace("-", " ").title()
+    print(f"  {title} Command Reference")
+    print(f"  {'=' * (len(title) + 20)}")
+    print()
+    for cmd, desc in entries:
+        print(f"  {cmd:40s}  {desc}")
+    print()
 
 
 def main() -> int:
@@ -1250,11 +1858,23 @@ def main() -> int:
         action="store_true",
         help="Show remaining demo requests for today",
     )
+    parser.add_argument(
+        "-d", "--dict",
+        metavar="TOOL",
+        nargs="?",
+        const="__list__",
+        default=None,
+        help="Show command reference for a tool (e.g., brew, npm, git, docker). Use -d alone to list available tools.",
+    )
 
     args = parser.parse_args()
     instruction_text = " ".join(args.instruction).strip()
 
     config = run_first_time_setup(force=args.setup)
+
+    if args.dict is not None:
+        show_dict(args.dict)
+        return 0
 
     if args.setup and not instruction_text:
         print(f"Setup complete. Config saved at {CONFIG_PATH}")
